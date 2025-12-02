@@ -6,35 +6,66 @@ from dateutil.relativedelta import relativedelta
 from caged_data import baixar_e_processar_caged
 
 # --- CONFIGURAÇÃO INICIAL ---
-st.set_page_config(page_title="Monitor Econômico Inteligente", layout="wide", page_icon="🧭")
+st.set_page_config(page_title="Monitor Econômico", layout="wide", page_icon="🧭")
 
-# --- ESTILO UX/UI ---
+# --- ESTILO UX/UI (CORREÇÃO DE CORES E SIDEBAR) ---
 st.markdown("""
 <style>
-    .stApp { background-color: #0F172A; }
+    /* 1. Forçar Fundo Escuro Global */
+    .stApp {
+        background-color: #0F172A;
+    }
+
+    /* 2. Forçar Fundo Escuro na Barra Lateral (Sidebar) */
+    section[data-testid="stSidebar"] {
+        background-color: #1E293B !important;
+        border-right: 1px solid #334155;
+    }
+    
+    /* 3. Cor dos Textos na Sidebar (Labels, Selectbox) */
+    section[data-testid="stSidebar"] h1, 
+    section[data-testid="stSidebar"] h2, 
+    section[data-testid="stSidebar"] h3, 
+    section[data-testid="stSidebar"] label, 
+    section[data-testid="stSidebar"] .stMarkdown {
+        color: #F8FAFC !important;
+    }
+
+    /* 4. Cards de KPI */
     div[data-testid="metric-container"] {
-        background-color: #1E293B; border: 1px solid #334155;
-        padding: 20px; border-radius: 10px;
+        background-color: #1E293B; 
+        border: 1px solid #334155;
+        padding: 20px; 
+        border-radius: 10px;
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
     }
-    div[data-testid="metric-container"] label { color: #94A3B8; }
-    div[data-testid="metric-container"] div[data-testid="stMetricValue"] { color: #F8FAFC; }
+    div[data-testid="metric-container"] label { color: #94A3B8 !important; }
+    div[data-testid="metric-container"] div[data-testid="stMetricValue"] { color: #F8FAFC !important; }
     
-    /* Botão Azul Forçado */
+    /* 5. Botão Azul Forçado */
     div.stButton > button {
-        background-color: #38BDF8 !important; color: #0F172A !important;
-        font-weight: bold !important; border: none !important;
+        background-color: #38BDF8 !important; 
+        color: #0F172A !important;
+        font-weight: bold !important; 
+        border: none !important;
         transition: 0.3s;
     }
     div.stButton > button:hover {
-        background-color: #0EA5E9 !important; color: white !important;
+        background-color: #0EA5E9 !important; 
+        color: white !important;
     }
     
+    /* 6. Textos Gerais */
     h1, h2, h3 {color: #F8FAFC !important;}
     p, span, div, li {color: #CBD5E1;}
+    
     .resumo-box {
-        background-color: #1E293B; border-left: 5px solid #38BDF8;
-        padding: 20px; border-radius: 5px; margin-bottom: 25px; color: #E2E8F0;
+        background-color: #1E293B; 
+        border-left: 5px solid #38BDF8;
+        padding: 20px; 
+        border-radius: 5px; 
+        margin-bottom: 25px; 
+        color: #E2E8F0;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -48,7 +79,22 @@ MAPA_CNAE = {
     'O': 'Adm. Pública', 'P': 'Educação', 'Q': 'Saúde', 'R': 'Artes',
     'S': 'Outros Serviços', 'T': 'Domésticos', 'U': 'Internacionais'
 }
-MAPA_MUNICIPIOS = {'430460': 'Canoas (RS)', '431490': 'Porto Alegre (RS)'}
+
+# Adicionei mais cidades principais do RS para evitar códigos
+MAPA_MUNICIPIOS = {
+    '430460': 'Canoas (RS)', 
+    '431490': 'Porto Alegre (RS)',
+    '430920': 'Gravataí (RS)',
+    '431870': 'São Leopoldo (RS)',
+    '431340': 'Novo Hamburgo (RS)',
+    '430310': 'Cachoeirinha (RS)',
+    '432300': 'Viamão (RS)',
+    '430060': 'Alvorada (RS)',
+    '430510': 'Caxias do Sul (RS)',
+    '431440': 'Pelotas (RS)',
+    '431690': 'Santa Maria (RS)'
+}
+
 MAPA_SEXO = {'1': 'Masculino', '3': 'Feminino', 'M': 'Masculino', 'F': 'Feminino'}
 
 # --- FUNÇÃO DE LIMPEZA ---
@@ -93,11 +139,19 @@ def normalizar_colunas(df):
     if 'salariomovimentacao' in df.columns:
         if isinstance(df['salariomovimentacao'], pd.DataFrame):
             df['salariomovimentacao'] = df['salariomovimentacao'].iloc[:, 0]
-            
+        # Tratamento seguro para string
         df['salariomovimentacao'] = df['salariomovimentacao'].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
         df['salariomovimentacao'] = pd.to_numeric(df['salariomovimentacao'], errors='coerce').fillna(0)
         
     return df
+
+# --- FUNÇÃO AUXILIAR PARA LIMPAR CÓDIGO DO MUNICÍPIO ---
+def limpar_codigo_municipio(valor):
+    # Transforma em string, remove espaços e remove .0 (caso venha como float)
+    v = str(valor).strip()
+    if v.endswith('.0'):
+        v = v[:-2]
+    return v
 
 # --- CARREGAR DADOS ---
 def carregar_historico(ano_fim, mes_fim):
@@ -158,20 +212,28 @@ if 'dados_full' not in st.session_state:
 
 df_full = st.session_state['dados_full']
 
-# Mapeamentos e Filtros
-if 'saldomovimentacao' not in df_full.columns:
-    st.error("Erro: Coluna de saldo não identificada.")
-    st.stop()
+# --- TRATAMENTO DE CIDADES (Correção dos Números) ---
+if 'municipio' in df_full.columns:
+    col_mun = 'municipio'
+else:
+    col_mun = df_full.columns[0] # Tenta pegar a primeira se não achar
 
-col_mun = 'municipio' if 'municipio' in df_full.columns else df_full.columns[0]
-df_full['Cidade'] = df_full[col_mun].astype(str).map(MAPA_MUNICIPIOS).fillna(df_full[col_mun].astype(str))
+# Aplica a limpeza no código antes de mapear
+df_full['cod_municipio_limpo'] = df_full[col_mun].apply(limpar_codigo_municipio)
+# Mapeia e, se não achar, mantém o código limpo
+df_full['Cidade'] = df_full['cod_municipio_limpo'].map(MAPA_MUNICIPIOS).fillna(df_full['cod_municipio_limpo'])
+
 col_sec = 'secao' if 'secao' in df_full.columns else 'seção'
 df_full['Setor'] = df_full[col_sec].astype(str).map(MAPA_CNAE).fillna("Outros")
 
 st.title(f"🧭 Bússola Econômica - {mes_sel}/{ano_sel}")
 
+# Ordena cidades, mas garante que Canoas fique selecionada se existir
 cidades_disp = sorted(df_full['Cidade'].unique())
-idx_padrao = cidades_disp.index('Canoas (RS)') if 'Canoas (RS)' in cidades_disp else 0
+idx_padrao = 0
+if 'Canoas (RS)' in cidades_disp:
+    idx_padrao = cidades_disp.index('Canoas (RS)')
+
 sel_cidade = st.selectbox("Analise o cenário de:", cidades_disp, index=idx_padrao)
 
 df_city_full = df_full[df_full['Cidade'] == sel_cidade]
@@ -197,11 +259,9 @@ if not df_mes.empty:
         nome_pag = rank.index[0]
         valor_pag = rank.iloc[0]
 
-# --- FORMATADOR BR (Para o Texto de Resumo) ---
+# --- FORMATADOR BR ---
 def formatar_moeda_br(valor):
-    # Formata como 3,000.00 primeiro (Padrão US)
     s = f"{valor:,.2f}"
-    # Inverte os caracteres: vírgula vira X, ponto vira vírgula, X vira ponto
     return s.replace(",", "X").replace(".", ",").replace("X", ".")
 
 texto_saldo = "Positivo 🟢" if saldo > 0 else "Negativo 🔴"
@@ -264,16 +324,10 @@ with t2:
         df_s = df_mes[(df_mes['saldomovimentacao'] == 1) & (df_mes['salariomovimentacao'] > 0)]
         if not df_s.empty:
             top = df_s.groupby('Setor')['salariomovimentacao'].mean().sort_values().tail(10).reset_index()
-            
-            # --- FORMATAÇÃO BRASILEIRA NO GRÁFICO ---
-            # Cria uma coluna de texto (label) personalizada
-            top['label_br'] = top['salariomovimentacao'].apply(lambda x: f"R$ {x:.2f}".replace('.', ','))
-            
-            # Usa 'text' apontando para essa coluna nova
+            top['label_br'] = top['salariomovimentacao'].apply(lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
             fig = px.bar(top, x='salariomovimentacao', y='Setor', orientation='h', 
-                         text='label_br',  # Aqui está o segredo
+                         text='label_br', 
                          color='salariomovimentacao', color_continuous_scale='Viridis')
-            
             fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', font_color="#F8FAFC")
             st.plotly_chart(fig, use_container_width=True)
         else: st.warning("Sem dados salariais válidos.")
